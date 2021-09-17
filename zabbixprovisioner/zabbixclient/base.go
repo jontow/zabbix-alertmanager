@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"sync/atomic"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type (
@@ -56,7 +57,6 @@ func (e *ExpectedMore) Error() string {
 
 type API struct {
 	Auth   string      // auth token, filled by Login()
-	Logger *log.Logger // request/response logger, nil by default
 	url    string
 	c      http.Client
 	id     int32
@@ -76,9 +76,7 @@ func (api *API) SetClient(c *http.Client) {
 }
 
 func (api *API) printf(format string, v ...interface{}) {
-	if api.Logger != nil {
-		api.Logger.Printf(format, v...)
-	}
+	log.Debugf(format, v...)
 }
 
 func (api *API) callBytes(method string, params interface{}) ([]byte, error) {
