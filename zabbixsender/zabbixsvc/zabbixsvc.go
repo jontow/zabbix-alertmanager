@@ -81,8 +81,11 @@ func (h *JSONHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Status == "" || req.CommonLabels["alertname"] == "" {
+	log.Debugf("HandlePost() req: '%#v'", req)
+
+	if req.Status == "" {
 		alertsErrorsTotal.WithLabelValues(req.Status, req.Receiver).Inc()
+		log.Warnf("HandlePost(): Status not found in request body")
 		http.Error(w, "missing fields in request body", http.StatusBadRequest)
 		return
 	}
@@ -102,14 +105,22 @@ func (h *JSONHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
 
 	var metrics []*zabbixsnd.Metric
 	for _, alert := range req.Alerts {
-		key := fmt.Sprintf("%s.%s", h.KeyPrefix, strings.ToLower(alert.Labels["alertname"]))
-		m := &zabbixsnd.Metric{Host: host, Key: key, Value: value}
+		if alert.Labels["alertname"] == "" {
+			log.Warnf("HandlePost(): alertname not found in alert, not sending: %#v", alert)
+		} else {
+			key := fmt.Sprintf("%s.%s", h.KeyPrefix, strings.ToLower(alert.Labels["alertname"]))
+			// Attempt to disambiguate rules when names are identical but severity is not:
+			if alert.Labels["severity"] != "" {
+				key = fmt.Sprintf("%s.%s--%s", h.KeyPrefix, strings.ToLower(alert.Labels["alertname"]), strings.ToLower(alert.Labels["severity"]))
+			}
+			m := &zabbixsnd.Metric{Host: host, Key: key, Value: value}
 
-		m.Clock = time.Now().Unix()
+			m.Clock = time.Now().Unix()
 
-		metrics = append(metrics, m)
+			metrics = append(metrics, m)
 
-		log.Debugf("sending zabbix metrics, host: '%s' key: '%s', value: '%s'", host, key, value)
+			log.Infof("sending zabbix metrics, host: '%s' key: '%s', value: '%s'", host, key, value)
+		}
 	}
 
 	res, err := h.zabbixSend(metrics)
@@ -120,7 +131,7 @@ func (h *JSONHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Debugf("request succesfully sent: %s", res)
+	log.Infof("request succesfully sent: %s", res)
 }
 
 func (h *JSONHandler) zabbixSend(metrics []*zabbixsnd.Metric) (*ZabbixResponse, error) {
