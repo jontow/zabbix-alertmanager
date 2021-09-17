@@ -148,7 +148,7 @@ func (p *Provisioner) LoadRulesFromPrometheus(hostConfig HostConfig) error {
 	for _, rule := range rules {
 		key := fmt.Sprintf("%s.%s", strings.ToLower(p.keyPrefix), strings.ToLower(rule.Name))
 
-		var triggerTags []zabbix.Tag
+		var triggerTags []zabbix.Tag = make([]zabbix.Tag, 0)
 		for k, v := range hostConfig.TriggerTags {
 			triggerTags = append(triggerTags, zabbix.Tag{Tag: k, Value: v})
 		}
