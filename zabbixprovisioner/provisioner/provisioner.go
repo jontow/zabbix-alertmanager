@@ -42,9 +42,13 @@ func New(prometheusUrl, keyPrefix, url, user, password string, hosts []HostConfi
 		Transport: transport,
 	})
 
-	_, err := api.Login(user, password)
-	if err != nil {
-		return nil, errors.Wrap(err, "error while login to zabbix api")
+	// TODO: pass url as "noop", shortcut for testing
+	//       should get converted to proper '--noop' or '--dryrun' option.
+	if url != "noop" {
+		_, err := api.Login(user, password)
+		if err != nil {
+			return nil, errors.Wrap(err, "error while login to zabbix api")
+		}
 	}
 
 	return &Provisioner{
