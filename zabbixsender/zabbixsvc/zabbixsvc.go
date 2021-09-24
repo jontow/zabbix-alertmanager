@@ -48,6 +48,7 @@ type JSONHandler struct {
 	KeyPrefix   string
 	DefaultHost string
 	Hosts       map[string]string
+	AlertFormat string
 }
 
 var (
@@ -109,8 +110,10 @@ func (h *JSONHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
 			log.Warnf("HandlePost(): alertname not found in alert, not sending: %#v", alert)
 		} else {
 			key := fmt.Sprintf("%s.%s", h.KeyPrefix, strings.ToLower(alert.Labels["alertname"]))
+
 			// Attempt to disambiguate rules when names are identical but severity is not:
-			if alert.Labels["severity"] != "" {
+			if h.AlertFormat == "severity" &&
+			   alert.Labels["severity"] != "" {
 				key = fmt.Sprintf("%s.%s--%s", h.KeyPrefix, strings.ToLower(alert.Labels["alertname"]), strings.ToLower(alert.Labels["severity"]))
 			}
 			m := &zabbixsnd.Metric{Host: host, Key: key, Value: value}

@@ -44,6 +44,8 @@ func main() {
 		Default("info").Enum("error", "warn", "info", "debug")
 	logFormat := app.Flag("log.format", "Log format.").
 		Default("text").Enum("text", "json")
+	alertFormat := app.Flag("alert.format", "Alertname format (bare='alertname', severity='alertname--severity')").
+		Default("bare").Enum("bare", "severity")
 
 	cmd := kingpin.MustParse(app.Parse(os.Args[1:]))
 
@@ -89,6 +91,7 @@ func main() {
 			KeyPrefix:   *keyPrefix,
 			DefaultHost: *defaultHost,
 			Hosts:       hosts,
+			AlertFormat: *alertFormat,
 		}
 
 		http.Handle("/metrics", promhttp.Handler())
