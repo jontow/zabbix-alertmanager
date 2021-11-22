@@ -87,7 +87,7 @@ spec:
         - send
         - --log.level=debug
         - --zabbix-addr=zabbix-server:10051
-        - --default-host=infra
+        - --default-host=openshift
         - --hosts-path=/etc/zal/sender-config.yml
         #image: quay.io/devopyio/zabbix-alertmanager:v1.2.4
         image: docker.io/jontow/zabbix-alertmanager:latest
