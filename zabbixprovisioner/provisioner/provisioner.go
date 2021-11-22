@@ -24,6 +24,7 @@ type HostConfig struct {
 	ItemDefaultTrapperHosts string            `yaml:"itemDefaultTrapperHosts"`
 	HostAlertsDir           string            `yaml:"alertsDir"`
 	TriggerTags             map[string]string `yaml:"triggerTags"`
+	ZabbixAPIVer			int               `yaml:"zabbixAPIVer"`
 }
 
 type Provisioner struct {
@@ -43,7 +44,8 @@ func New(prometheusUrl, keyPrefix, url, user, password string, hosts []HostConfi
 	})
 
 	// TODO: pass url as "noop", shortcut for testing
-	//       should get converted to proper '--noop' or '--dryrun' option.
+	//       should get converted to proper '--noop' or '--dryrun' option,
+	//       but works fine this way.
 	if url != "noop" {
 		_, err := api.Login(user, password)
 		if err != nil {
@@ -133,7 +135,6 @@ func (p *Provisioner) LoadRulesFromPrometheus(hostConfig HostConfig) error {
 		},
 		HostGroups:   make(map[string]struct{}, len(hostConfig.HostGroups)),
 		Items:        map[string]*CustomItem{},
-		Applications: map[string]*CustomApplication{},
 		Triggers:     map[string]*CustomTrigger{},
 	}
 
@@ -152,6 +153,7 @@ func (p *Provisioner) LoadRulesFromPrometheus(hostConfig HostConfig) error {
 	for _, rule := range rules {
 		key := fmt.Sprintf("%s.%s", strings.ToLower(p.keyPrefix), strings.ToLower(rule.Name))
 
+		var itemTags []zabbix.ItemTag = make([]zabbix.ItemTag, 0)
 		var triggerTags []zabbix.Tag = make([]zabbix.Tag, 0)
 		for k, v := range hostConfig.TriggerTags {
 			triggerTags = append(triggerTags, zabbix.Tag{Tag: k, Value: v})
@@ -168,18 +170,35 @@ func (p *Provisioner) LoadRulesFromPrometheus(hostConfig HostConfig) error {
 				History:      hostConfig.ItemDefaultHistory,
 				Trends:       hostConfig.ItemDefaultTrends,
 				TrapperHosts: hostConfig.ItemDefaultTrapperHosts,
+				ItemTags:         itemTags,
 			},
-			Applications: map[string]struct{}{},
 		}
 
-		newTrigger := &CustomTrigger{
-			State: StateNew,
-			Trigger: zabbix.Trigger{
-				Description: rule.Name,
-				Expression:  fmt.Sprintf("{%s:%s.last()}<>0", newHost.Name, key),
-				ManualClose: 1,
-				Tags:        triggerTags,
-			},
+		// Older Zabbix installations (pre-5.x) use different expression syntax.
+		// We default to the newer syntax here (see the 'else' clause):
+		newTrigger := &CustomTrigger{}
+		log.Debugf("DEBUG - hostConfig.ZabbixAPIVer='%v'", hostConfig.ZabbixAPIVer)
+		if hostConfig.ZabbixAPIVer > 0 && hostConfig.ZabbixAPIVer < 5 {
+			newTrigger = &CustomTrigger{
+				State: StateNew,
+				Trigger: zabbix.Trigger{
+					Description: rule.Name,
+					Expression:  fmt.Sprintf("{%s:%s.last()}<>0", newHost.Name, key),
+					ManualClose: 1,
+					Tags:        triggerTags,
+				},
+			}
+		} else {
+			newTrigger = &CustomTrigger{
+				State: StateNew,
+				Trigger: zabbix.Trigger{
+					Description: rule.Name,
+					// https://www.zabbix.com/documentation/current/manual/introduction/whatsnew540#new_expression_syntax_for_triggers_and_calculated_items
+					Expression:  fmt.Sprintf("last(/%s/%s)<>0", newHost.Name, key),
+					ManualClose: 1,
+					Tags:        triggerTags,
+				},
+			}
 		}
 
 		if p.prometheusUrl != "" {
@@ -210,14 +229,8 @@ func (p *Provisioner) LoadRulesFromPrometheus(hostConfig HostConfig) error {
 		}
 
 		// If no applications are found in the rule, add the default application declared in the configuration
-		if len(newItem.Applications) == 0 {
-			newHost.AddApplication(&CustomApplication{
-				State: StateNew,
-				Application: zabbix.Application{
-					Name: hostConfig.ItemDefaultApplication,
-				},
-			})
-			newItem.Applications[hostConfig.ItemDefaultApplication] = struct{}{}
+		if len(newItem.ItemTags) == 0 {
+			newItem.ItemTags = append(itemTags, zabbix.ItemTag{Tag: "Application", Value: hostConfig.ItemDefaultApplication})
 		}
 
 		log.Debugf("Loading item from Prometheus: %+v", newItem)
@@ -304,21 +317,6 @@ func (p *Provisioner) LoadDataFromZabbix() error {
 		})
 		log.Debugf("Load host from Zabbix: %+v", oldHost)
 
-		zabbixApplications, err := p.api.ApplicationsGet(zabbix.Params{
-			"output":  "extend",
-			"hostids": oldHost.HostId,
-		})
-		if err != nil {
-			return errors.Wrapf(err, "error getting application, hostid: %v", oldHost.HostId)
-		}
-
-		for _, zabbixApplication := range zabbixApplications {
-			oldHost.AddApplication(&CustomApplication{
-				State:       StateOld,
-				Application: zabbixApplication,
-			})
-		}
-
 		zabbixItems, err := p.api.ItemsGet(zabbix.Params{
 			"output":  "extend",
 			"hostids": oldHost.Host.HostId,
@@ -331,19 +329,6 @@ func (p *Provisioner) LoadDataFromZabbix() error {
 			newItem := &CustomItem{
 				State: StateOld,
 				Item:  zabbixItem,
-			}
-
-			zabbixApplications, err := p.api.ApplicationsGet(zabbix.Params{
-				"output":  "extend",
-				"itemids": zabbixItem.ItemId,
-			})
-			if err != nil {
-				return errors.Wrapf(err, "error getting item, itemid: %v", oldHost.Host.HostId)
-			}
-
-			newItem.Applications = make(map[string]struct{}, len(zabbixApplications))
-			for _, zabbixApplication := range zabbixApplications {
-				newItem.Applications[zabbixApplication.Name] = struct{}{}
 			}
 
 			log.Debugf("Loading item from Zabbix: %+v", newItem)
@@ -407,24 +392,6 @@ func (p *Provisioner) ApplyChanges() error {
 
 	for _, host := range p.Hosts {
 		log.Debugf("Updating host, hostName: %s", host.Name)
-
-		applicationsByState := host.GetApplicationsByState()
-		if len(applicationsByState[StateOld]) != 0 {
-			log.Debugf("Deleting applications: %+v\n", applicationsByState[StateOld])
-			err := p.api.ApplicationsDelete(applicationsByState[StateOld])
-			if err != nil {
-				return errors.Wrap(err, "Failed in deleting applications")
-			}
-		}
-
-		if len(applicationsByState[StateNew]) != 0 {
-			log.Debugf("Creating applications: %+v\n", applicationsByState[StateNew])
-			err := p.api.ApplicationsCreate(applicationsByState[StateNew])
-			if err != nil {
-				return errors.Wrap(err, "Failed in creating applications")
-			}
-		}
-		host.PropagateCreatedApplications(applicationsByState[StateNew])
 
 		itemsByState := host.GetItemsByState()
 		triggersByState := host.GetTriggersByState()

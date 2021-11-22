@@ -48,7 +48,13 @@ const (
 	Delta DeltaType = 2
 )
 
+type ItemTag struct {
+	Tag          string    `json:"tag"`
+	Value        string    `json:"value"`
+}
+
 // https://www.zabbix.com/documentation/2.2/manual/appendix/api/item/definitions
+// https://www.zabbix.com/documentation/6.0/manual/api/reference/item/object#item
 type Item struct {
 	ItemId       string    `json:"itemid,omitempty"`
 	Delay        int       `json:"delay"`
@@ -66,7 +72,7 @@ type Item struct {
 	Trends       string    `json:"trends,omitempty"`
 	TrapperHosts string    `json:"trapper_hosts,omitempty"`
 
-	ApplicationIds []string `json:"applications,omitempty"`
+	ItemTags     []ItemTag `json:"tags,omitempty"`
 }
 
 type Items []Item
@@ -97,11 +103,6 @@ func (api *API) ItemsGet(params Params) (Items, error) {
 
 	reflector.MapsToStructs2(response.Result.([]interface{}), &res, reflector.Strconv, "json")
 	return res, nil
-}
-
-// Gets items by application Id.
-func (api *API) ItemsGetByApplicationId(id string) (res Items, err error) {
-	return api.ItemsGet(Params{"applicationids": id})
 }
 
 // Wrapper for item.create: https://www.zabbix.com/documentation/2.2/manual/appendix/api/item/create

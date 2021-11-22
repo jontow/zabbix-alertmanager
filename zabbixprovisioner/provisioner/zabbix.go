@@ -324,16 +324,12 @@ func (host *CustomHost) GetItemsByState() (itemsByState map[State]zabbix.Items) 
 	newItemAmmount := 0
 	for _, item := range host.Items {
 		item.HostId = host.HostId
-		item.Item.ApplicationIds = []string{}
-		for appName, _ := range item.Applications {
-			item.Item.ApplicationIds = append(item.Item.ApplicationIds, host.Applications[appName].ApplicationId)
-		}
 		itemsByState[item.State] = append(itemsByState[item.State], item.Item)
 		if StateName[item.State] == "New" || StateName[item.State] == "Updated" {
 			newItemAmmount++
-			log.Infof("GetItemsByState = State: %s, Key: %s, Applications: %+v", StateName[item.State], item.Key, item.Applications)
+			log.Infof("GetItemsByState = State: %s, Key: %s", StateName[item.State], item.Key)
 		} else {
-			log.Debugf("GetItemsByState = State: %s, Key: %s, Applications: %+v", StateName[item.State], item.Key, item.Applications)
+			log.Debugf("GetItemsByState = State: %s, Key: %s", StateName[item.State], item.Key)
 		}
 	}
 
